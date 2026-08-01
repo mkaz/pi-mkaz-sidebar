@@ -1,4 +1,4 @@
-# Pi Mkaz Sidebar
+# Pi mkaz Sidebar
 
 A fixed, read-only activity sidebar for [Pi](https://pi.dev). The sidebar holds session, tool, workspace, context, and usage detail. The footer deliberately stays quiet: status on the left; model and effort on the right.
 
