@@ -2,7 +2,11 @@
 
 A fixed, read-only activity sidebar for [Pi](https://pi.dev). The sidebar holds session, tool, workspace, context, and usage detail. The footer deliberately stays quiet: status on the left; model and effort on the right.
 
+![Screenshot of Sidebar in Pi Coding Harness](https://github.com/user-attachments/assets/e68ecccf-53f8-4d85-8663-0ce01720f02e)
+
 ## Install locally
+
+Clone repo and change to directory:
 
 ```bash
 pi -e .
