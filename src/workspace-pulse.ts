@@ -1,5 +1,12 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import nodePath from "node:path";
+
+export interface WorkspaceFileChange {
+	status: string;
+	path: string;
+	fromPath?: string;
+	modifiedAt: number;
+}
 
 export interface WorkspacePulseSnapshot {
 	trackedFiles: number;
@@ -9,6 +16,7 @@ export interface WorkspacePulseSnapshot {
 	binaryFiles: number;
 	submodules: number;
 	conflicts: number;
+	changedFiles: readonly WorkspaceFileChange[];
 }
 
 export interface WorkspacePulseData {
@@ -49,6 +57,7 @@ const EMPTY_SNAPSHOT: WorkspacePulseSnapshot = {
 	binaryFiles: 0,
 	submodules: 0,
 	conflicts: 0,
+	changedFiles: [],
 };
 
 function hasGitMarker(cwd: string): boolean {
@@ -79,6 +88,7 @@ interface ParsedStatus {
 	untrackedFiles: number;
 	conflicts: number;
 	submodulePaths: Set<string>;
+	changedFiles: WorkspaceFileChange[];
 }
 
 function parseStatus(output: string): ParsedStatus {
@@ -89,6 +99,7 @@ function parseStatus(output: string): ParsedStatus {
 		untrackedFiles: 0,
 		conflicts: 0,
 		submodulePaths: new Set(),
+		changedFiles: [],
 	};
 	let sawBranchOid = false;
 	let sawBranchHead = false;
@@ -108,6 +119,7 @@ function parseStatus(output: string): ParsedStatus {
 		}
 		if (record.startsWith("? ")) {
 			parsed.untrackedFiles += 1;
+			parsed.changedFiles.push({ status: "??", path: record.slice(2), modifiedAt: 0 });
 			continue;
 		}
 		const kind = record[0];
@@ -118,11 +130,31 @@ function parseStatus(output: string): ParsedStatus {
 		const submodule = fields[2] ?? "";
 		const pathIndex = kind === "u" ? 10 : kind === "2" ? 9 : 8;
 		const path = fields.slice(pathIndex).join(" ");
+		const xy = record.slice(2, 4).replace(/\./g, " ");
+		const fromPath = kind === "2" ? records[index + 1] : undefined;
+		if (path)
+			parsed.changedFiles.push({
+				status: xy,
+				path,
+				...(fromPath ? { fromPath } : {}),
+				modifiedAt: 0,
+			});
 		if (submodule.startsWith("S") && path) parsed.submodulePaths.add(path);
 		if (kind === "2") index += 1;
 	}
 	parsed.valid = sawBranchOid && sawBranchHead;
 	return parsed;
+}
+
+function fileModifiedAt(root: string, path: string): number {
+	try {
+		const absolutePath = nodePath.resolve(root, path);
+		const relative = nodePath.relative(root, absolutePath);
+		if (nodePath.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${nodePath.sep}`)) return 0;
+		return statSync(absolutePath).mtimeMs;
+	} catch {
+		return 0;
+	}
 }
 
 function parseNumstat(
@@ -205,6 +237,9 @@ async function inspectWorkspacePulseUnchecked(
 	if (diff.code !== 0 || diff.killed) return { kind: "unavailable" };
 
 	const numstat = parseNumstat(diff.stdout, parsedStatus.submodulePaths);
+	const changedFiles = parsedStatus.changedFiles
+		.map((change) => ({ ...change, modifiedAt: fileModifiedAt(root, change.path) }))
+		.sort((left, right) => right.modifiedAt - left.modifiedAt || left.path.localeCompare(right.path));
 	return {
 		kind: "available",
 		root,
@@ -212,6 +247,7 @@ async function inspectWorkspacePulseUnchecked(
 		...(parsedStatus.branch ? { branch: parsedStatus.branch } : {}),
 		snapshot: {
 			...EMPTY_SNAPSHOT,
+			changedFiles,
 			trackedFiles: parsedStatus.trackedFiles,
 			untrackedFiles: parsedStatus.untrackedFiles,
 			conflicts: parsedStatus.conflicts,

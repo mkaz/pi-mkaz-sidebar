@@ -34,13 +34,7 @@ A trusted project may supply an override at:
 <project>/.pi/pi-mkaz-sidebar.json
 ```
 
-The useful personal settings are:
-
-```json
-{
-  "showSidebarToolNames": false
-}
-```
+The sidebar uses Pi's configured theme and needs no custom style settings.
 
 ## Privacy and local behavior
 

@@ -14,7 +14,7 @@ import {
 } from "./run-activity.js";
 import { createSplitPaneController, type SplitPaneController } from "./split-pane.js";
 import type { SidebarConfig, SidebarState, WorkspacePulseState } from "./types.js";
-import type { WorkspacePulseData } from "./workspace-pulse.js";
+import type { WorkspaceFileChange, WorkspacePulseData } from "./workspace-pulse.js";
 
 export interface SidebarSnapshotInput {
 	state: SidebarState;
@@ -22,9 +22,6 @@ export interface SidebarSnapshotInput {
 	sessionName?: string;
 	sessionFile?: string;
 	branchEntryCount: number;
-	activeToolCount: number;
-	availableToolCount: number;
-	activeToolNames?: readonly string[];
 	extensionStatuses: readonly string[];
 	runActivity?: RunActivitySnapshot;
 }
@@ -36,9 +33,6 @@ export interface SidebarSnapshot extends SidebarState {
 	sessionFile?: string;
 	persisted: boolean;
 	branchEntryCount: number;
-	activeToolCount: number;
-	availableToolCount: number;
-	activeToolNames: readonly string[];
 	runActivity: RunActivitySnapshot;
 }
 
@@ -57,11 +51,6 @@ export function buildSidebarSnapshot(input: SidebarSnapshotInput): SidebarSnapsh
 		...(input.sessionFile ? { sessionFile: input.sessionFile } : {}),
 		persisted: Boolean(input.sessionFile),
 		branchEntryCount: input.branchEntryCount,
-		activeToolCount: input.activeToolCount,
-		availableToolCount: input.availableToolCount,
-		activeToolNames: [...new Set((input.activeToolNames ?? []).map(sanitize).filter(Boolean))].sort((a, b) =>
-			a.localeCompare(b, "en"),
-		),
 		extensionStatuses: input.extensionStatuses,
 		runActivity: input.runActivity ?? EMPTY_RUN_ACTIVITY,
 	};
@@ -143,15 +132,10 @@ const COMPACT_SIDEBAR_MAX_WIDTH = 43;
 
 interface SidebarLayout {
 	compact: boolean;
-	showToolNames: boolean;
 }
 
-function sidebarLayout(width: number, config: SidebarConfig): SidebarLayout {
-	const compact = width <= COMPACT_SIDEBAR_MAX_WIDTH;
-	return {
-		compact,
-		showToolNames: config.showSidebarToolNames && !compact,
-	};
+function sidebarLayout(width: number, _config: SidebarConfig): SidebarLayout {
+	return { compact: width <= COMPACT_SIDEBAR_MAX_WIDTH };
 }
 
 function activityRole(activity: SidebarSnapshot["activity"]): PaletteRole {
@@ -227,12 +211,14 @@ function workspacePulseRows(
 	const { snapshot } = pulse.data;
 	if (pulse.status === "clean") return { core: [palette.paint("ready", "✓ clean")], details: [] };
 	const tracked = `${formatPulseCount(snapshot.trackedFiles)} tracked`;
-	const lines = `+${formatPulseCount(snapshot.linesAdded)}  −${formatPulseCount(snapshot.linesRemoved)}`;
+	const lines = `${palette.paint("success", `+${formatPulseCount(snapshot.linesAdded)}`)}  ${palette.paint(
+		"error",
+		`−${formatPulseCount(snapshot.linesRemoved)}`,
+	)}`;
 	const role = pulse.status === "stale" ? "warning" : "primary";
 	const prefix = pulse.status === "stale" ? "~ stale · " : "";
-	const core = layout.compact
-		? [palette.paint(role, `${prefix}${tracked}`), palette.paint(role, lines)]
-		: [palette.paint(role, `${prefix}${tracked}  ${lines}`)];
+	const summary = palette.paint(role, `${prefix}${tracked}`);
+	const core = layout.compact ? [summary, lines] : [`${summary}  ${lines}`];
 	if (snapshot.conflicts > 0)
 		core.push(palette.paint("error", `${finiteCount(snapshot.conflicts)} conflicts`));
 	const details = [
@@ -260,7 +246,22 @@ interface WorkspaceRows {
 	location: string[];
 	pulseCore: string[];
 	pulseDetails: string[];
+	files: string[];
 	session: string[];
+}
+
+function statusLetterRole(letter: string): PaletteRole {
+	if (letter === "A") return "success";
+	if (letter === "D" || letter === "U") return "error";
+	if (letter === "M" || letter === "T" || letter === "?") return "warning";
+	if (letter === "R" || letter === "C") return "accent";
+	return "dim";
+}
+
+function workspaceFileRow(change: WorkspaceFileChange, palette: SidebarPalette): string {
+	const path = change.fromPath ? `${change.fromPath} → ${change.path}` : change.path;
+	const status = [...change.status].map((letter) => palette.paint(statusLetterRole(letter), letter)).join("");
+	return `${status} ${palette.paint("primary", sanitize(path))}`;
 }
 
 function workspaceRows(
@@ -294,6 +295,7 @@ function workspaceRows(
 		location,
 		pulseCore: pulse.core,
 		pulseDetails: pulse.details,
+		files: pulseData?.snapshot.changedFiles.map((change) => workspaceFileRow(change, palette)) ?? [],
 		session,
 	};
 }
@@ -423,53 +425,6 @@ function usageRows(
 			currencyDecimals(config.currencyDecimals),
 		)}`;
 		rows.push(metricValue("Cost", cost, palette, "cost"));
-	}
-	return rows;
-}
-
-function toolsStatusRows(
-	snapshot: SidebarSnapshot,
-	showToolNames: boolean,
-	contentWidth: number,
-	palette: SidebarPalette,
-): string[] {
-	const disclosure = showToolNames ? "▾" : "▸";
-	return [
-		spacedRow(
-			palette.paint(
-				"primary",
-				`${finiteCount(snapshot.activeToolCount)} / ${finiteCount(snapshot.availableToolCount)} active`,
-			),
-			palette.paint("dim", disclosure),
-			contentWidth,
-		),
-	];
-}
-
-function activeToolNameRows(
-	snapshot: SidebarSnapshot,
-	contentWidth: number,
-	palette: SidebarPalette,
-): string[] {
-	const names = snapshot.activeToolNames.map((name) => palette.paint("primary", name));
-	if (names.length === 0) return [];
-
-	const leftColumnWidth = names.reduce(
-		(maximum, name, index) => (index % 2 === 0 ? Math.max(maximum, visibleWidth(name)) : maximum),
-		0,
-	);
-	const rightColumnWidth = names.reduce(
-		(maximum, name, index) => (index % 2 === 1 ? Math.max(maximum, visibleWidth(name)) : maximum),
-		0,
-	);
-	const columnGap = "  ";
-	if (leftColumnWidth + visibleWidth(columnGap) + rightColumnWidth > contentWidth) return names;
-
-	const rows: string[] = [];
-	for (let index = 0; index < names.length; index += 2) {
-		const left = names[index] ?? "";
-		const right = names[index + 1];
-		rows.push(right === undefined ? left : `${padToWidth(left, leftColumnWidth)}${columnGap}${right}`);
 	}
 	return rows;
 }
@@ -735,7 +690,6 @@ export function renderSidebarLines(
 	const contentWidth = Math.max(0, safeWidth - 2);
 	const panelContentWidth = Math.max(0, contentWidth - 4);
 	const layout = sidebarLayout(safeWidth, config);
-	const toolNameRows = layout.showToolNames ? activeToolNameRows(snapshot, panelContentWidth, palette) : [];
 	const workspace = workspaceRows(snapshot, layout, palette);
 	const groups: SidebarGroup[] = [
 		{
@@ -769,7 +723,23 @@ export function renderSidebarLines(
 			dropRank: Number.POSITIVE_INFINITY,
 		},
 		{
-			name: "workspaceCore",
+			name: "session",
+			panel: "CONTEXT",
+			panelRole: contextRole(snapshot, config),
+			rows: workspace.session,
+			required: false,
+			dropRank: 4,
+		},
+		{
+			name: "usage",
+			panel: "USAGE",
+			panelRole: "output",
+			rows: usageRows(snapshot, config, panelContentWidth, layout, palette),
+			required: false,
+			dropRank: 20,
+		},
+		{
+			name: "workspaceIdentity",
 			panel: "WORKSPACE",
 			panelRole: "accent",
 			rows: workspace.identity,
@@ -785,7 +755,7 @@ export function renderSidebarLines(
 			dropRank: 5,
 		},
 		{
-			name: "workspaceCore",
+			name: "workspacePulse",
 			panel: "WORKSPACE",
 			panelRole: "accent",
 			rows: workspace.pulseCore,
@@ -800,37 +770,13 @@ export function renderSidebarLines(
 			required: false,
 			dropRank: 6,
 		},
-		{
-			name: "workspaceSession",
+		...workspace.files.map((row, index, files) => ({
+			name: `workspaceFile:${index}`,
 			panel: "WORKSPACE",
-			panelRole: "accent",
-			rows: workspace.session,
-			required: false,
-			dropRank: 4,
-		},
-		{
-			name: "usage",
-			panel: "USAGE",
-			panelRole: "output",
-			rows: usageRows(snapshot, config, panelContentWidth, layout, palette),
-			required: false,
-			dropRank: 20,
-		},
-		{
-			name: "toolsStatus",
-			panel: "TOOLS",
-			panelRole: "cache",
-			rows: toolsStatusRows(snapshot, layout.showToolNames, panelContentWidth, palette),
-			required: false,
-			dropRank: 10,
-		},
-		...toolNameRows.map((row, index, rows) => ({
-			name: `activeToolNames:${index}`,
-			panel: "TOOLS",
-			panelRole: "cache" as const,
+			panelRole: "accent" as const,
 			rows: [row],
 			required: false,
-			dropRank: (rows.length - index) / 100,
+			dropRank: 10 + (files.length - index) / 100,
 		})),
 	];
 	return renderDock(

@@ -71,7 +71,6 @@ export interface SidebarConfig extends DisplaySettings {
 	contextWarning: number;
 	contextDanger: number;
 	currencyDecimals: number;
-	showSidebarToolNames: boolean;
 }
 
 export interface SidebarMetrics {
@@ -129,5 +128,4 @@ export const DEFAULT_CONFIG: SidebarConfig = {
 	contextWarning: 70,
 	contextDanger: 90,
 	currencyDecimals: 3,
-	showSidebarToolNames: false,
 };

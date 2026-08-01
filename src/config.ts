@@ -280,10 +280,6 @@ function applyNonDisplay(input: unknown, config: SidebarConfig, warnings: string
 			config.currencyDecimals = input.currencyDecimals;
 		else warnings.push("currencyDecimals must be an integer from 0 through 6");
 	}
-	for (const key of ["showSidebarToolNames"] as const) {
-		if (typeof input[key] === "boolean") config[key] = input[key];
-		else if (key in input) warnings.push(`${key} must be boolean`);
-	}
 }
 
 export function validateConfig(input: unknown, base: SidebarConfig = DEFAULT_CONFIG): ConfigLoadResult {
