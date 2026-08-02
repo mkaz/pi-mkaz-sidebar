@@ -1,6 +1,6 @@
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { createPalette, effortRole, type PaletteRole } from "./palette.js";
-import type { SidebarConfig, SidebarState, FooterState } from "./types.js";
+import type { SidebarState, FooterState } from "./types.js";
 
 export interface ThemeLike {
 	readonly name?: string;
@@ -41,7 +41,6 @@ function modelText(state: FooterState, theme: ThemeLike, colorEnabled: boolean):
 
 export function renderFooterLine(
 	state: FooterState,
-	_config: SidebarConfig,
 	theme: ThemeLike,
 	width: number,
 	colorEnabled = true,
@@ -59,7 +58,6 @@ export function renderFooterLine(
 
 export interface FooterComponentOptions {
 	getState(): FooterState;
-	getConfig(): SidebarConfig;
 	colorEnabled?: boolean;
 	requestRender(): void;
 	onBranchChange(callback: () => void): () => void;
@@ -73,7 +71,6 @@ export function createFooterComponent(options: FooterComponentOptions): Componen
 			return [
 				renderFooterLine(
 					options.getState(),
-					options.getConfig(),
 					options.theme,
 					width,
 					options.colorEnabled ?? true,

@@ -1,6 +1,6 @@
 # Agent Guide
 
-Read [`README.md`](README.md) first for the project overview, installation, controls, configuration, and behavior constraints.
+Read [`README.md`](README.md) first for the project overview, installation, controls, customization, and behavior constraints.
 
 ## Project layout
 
@@ -8,8 +8,7 @@ Read [`README.md`](README.md) first for the project overview, installation, cont
 - `src/sidebar.ts` renders the sidebar and manages its overlay/split-pane lifecycle.
 - `src/footer.ts` renders the footer.
 - `src/state.ts`, `src/metrics.ts`, `src/run-activity.ts`, and `src/workspace-pulse.ts` collect and maintain displayed state.
-- `src/config.ts` loads, validates, and merges configuration.
-- `src/display.ts`, `src/palette.ts`, and `src/types.ts` define display settings, colors, and shared types.
+- `src/palette.ts` and `src/types.ts` define colors and shared types.
 
 ## Editing guidance
 

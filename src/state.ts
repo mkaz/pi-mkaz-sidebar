@@ -1,11 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { aggregateMetrics, type UsageMessage } from "./metrics.js";
-import type {
-	ActivityState,
-	SidebarConfig,
-	SidebarState,
-} from "./types.js";
+import type { ActivityState, SidebarState } from "./types.js";
 import {
 	inspectWorkspacePulse,
 	type WorkspacePulseData,
@@ -16,7 +12,6 @@ const WORKSPACE_REFRESH_DEBOUNCE_MS = 250;
 export interface RuntimeDependencies {
 	pi: ExtensionAPI;
 	ctx: ExtensionContext;
-	config: SidebarConfig;
 	autoCompact: boolean | null;
 	requestRender(): void;
 	inspectWorkspace?(): Promise<WorkspacePulseInspection>;
@@ -28,7 +23,6 @@ export class SidebarRuntime {
 	readonly #autoCompact: boolean | null;
 	readonly #requestRender: () => void;
 	readonly #inspectWorkspace: () => Promise<WorkspacePulseInspection>;
-	#config: SidebarConfig;
 	#disposed = false;
 	#workspaceRefreshGeneration = 0;
 	#workspaceRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -38,7 +32,6 @@ export class SidebarRuntime {
 	constructor(dependencies: RuntimeDependencies) {
 		this.#pi = dependencies.pi;
 		this.#ctx = dependencies.ctx;
-		this.#config = dependencies.config;
 		this.#autoCompact = dependencies.autoCompact;
 		this.#requestRender = dependencies.requestRender;
 		this.#inspectWorkspace =
@@ -61,10 +54,6 @@ export class SidebarRuntime {
 
 	getState(): SidebarState {
 		return this.#state;
-	}
-
-	getConfig(): SidebarConfig {
-		return this.#config;
 	}
 
 

@@ -13,7 +13,7 @@ import {
 	type ToolActivity,
 } from "./run-activity.js";
 import { createSplitPaneController, type SplitPaneController } from "./split-pane.js";
-import type { SidebarConfig, SidebarState, WorkspacePulseState } from "./types.js";
+import type { SidebarState, WorkspacePulseState } from "./types.js";
 import type { WorkspaceFileChange, WorkspacePulseData } from "./workspace-pulse.js";
 
 export interface SidebarSnapshotInput {
@@ -134,7 +134,7 @@ interface SidebarLayout {
 	compact: boolean;
 }
 
-function sidebarLayout(width: number, _config: SidebarConfig): SidebarLayout {
+function sidebarLayout(width: number): SidebarLayout {
 	return { compact: width <= COMPACT_SIDEBAR_MAX_WIDTH };
 }
 
@@ -300,11 +300,11 @@ function workspaceRows(
 	};
 }
 
-function contextRole(snapshot: SidebarSnapshot, config: SidebarConfig): PaletteRole {
+function contextRole(snapshot: SidebarSnapshot): PaletteRole {
 	const percent = snapshot.metrics.contextPercent;
 	if (percent === null || !Number.isFinite(percent)) return "dim";
-	if (percent >= config.contextDanger) return "error";
-	if (percent >= config.contextWarning) return "warning";
+	if (percent >= 90) return "error";
+	if (percent >= 70) return "warning";
 	return "context";
 }
 
@@ -319,7 +319,6 @@ function spacedRow(left: string, right: string, width: number): string {
 
 function contextRows(
 	snapshot: SidebarSnapshot,
-	config: SidebarConfig,
 	contentWidth: number,
 	layout: SidebarLayout,
 	palette: SidebarPalette,
@@ -334,7 +333,7 @@ function contextRows(
 		return [palette.paint("dim", "Context unavailable")];
 	}
 
-	const role = contextRole(snapshot, config);
+	const role = contextRole(snapshot);
 	const usage = `${formatTokens(metrics.contextTokens ?? 0)} / ${
 		metrics.contextWindow > 0 ? formatTokens(metrics.contextWindow) : "—"
 	}`;
@@ -385,7 +384,6 @@ function metricPairRows(
 
 function usageRows(
 	snapshot: SidebarSnapshot,
-	config: SidebarConfig,
 	contentWidth: number,
 	layout: SidebarLayout,
 	palette: SidebarPalette,
@@ -422,7 +420,7 @@ function usageRows(
 	}
 	if (metrics.costAvailable) {
 		const cost = `$${Math.max(0, Number.isFinite(metrics.cost) ? metrics.cost : 0).toFixed(
-			currencyDecimals(config.currencyDecimals),
+			currencyDecimals(3),
 		)}`;
 		rows.push(metricValue("Cost", cost, palette, "cost"));
 	}
@@ -676,7 +674,6 @@ function composeGroups(
 
 export function renderSidebarLines(
 	snapshot: SidebarSnapshot,
-	config: SidebarConfig,
 	theme: ThemeLike,
 	width: number,
 	height: number,
@@ -689,7 +686,7 @@ export function renderSidebarLines(
 	if (safeWidth <= 0 || safeHeight <= 0) return [];
 	const contentWidth = Math.max(0, safeWidth - 2);
 	const panelContentWidth = Math.max(0, contentWidth - 4);
-	const layout = sidebarLayout(safeWidth, config);
+	const layout = sidebarLayout(safeWidth);
 	const workspace = workspaceRows(snapshot, layout, palette);
 	const groups: SidebarGroup[] = [
 		{
@@ -717,15 +714,15 @@ export function renderSidebarLines(
 		{
 			name: "context",
 			panel: "CONTEXT",
-			panelRole: contextRole(snapshot, config),
-			rows: contextRows(snapshot, config, panelContentWidth, layout, palette),
+			panelRole: contextRole(snapshot),
+			rows: contextRows(snapshot, panelContentWidth, layout, palette),
 			required: true,
 			dropRank: Number.POSITIVE_INFINITY,
 		},
 		{
 			name: "session",
 			panel: "CONTEXT",
-			panelRole: contextRole(snapshot, config),
+			panelRole: contextRole(snapshot),
 			rows: workspace.session,
 			required: false,
 			dropRank: 4,
@@ -734,7 +731,7 @@ export function renderSidebarLines(
 			name: "usage",
 			panel: "USAGE",
 			panelRole: "output",
-			rows: usageRows(snapshot, config, panelContentWidth, layout, palette),
+			rows: usageRows(snapshot, panelContentWidth, layout, palette),
 			required: false,
 			dropRank: 20,
 		},
@@ -794,7 +791,6 @@ export function renderSidebarLines(
 
 export interface SidebarComponentOptions {
 	getSnapshot(): SidebarSnapshot;
-	getConfig(): SidebarConfig;
 	getHeight(): number;
 	theme: ThemeLike;
 	colorEnabled?: boolean;
@@ -819,7 +815,6 @@ export function createSidebarComponent(options: SidebarComponentOptions): Compon
 			try {
 				return renderSidebarLines(
 					options.getSnapshot(),
-					options.getConfig(),
 					options.theme,
 					width,
 					height,
@@ -846,7 +841,6 @@ export interface SidebarController {
 export interface SidebarControllerOptions {
 	ctx: ExtensionContext;
 	getSnapshot(): SidebarSnapshot;
-	getConfig(): SidebarConfig;
 	colorEnabled?: boolean;
 	shouldAnimate?(): boolean;
 	animationIntervalMs?: number;
@@ -965,7 +959,6 @@ export function createSidebarController(options: SidebarControllerOptions): Side
 					}
 					return createSidebarComponent({
 						getSnapshot: options.getSnapshot,
-						getConfig: options.getConfig,
 						getHeight: () => tui.terminal.rows,
 						theme: theme as unknown as ThemeLike,
 						...(options.colorEnabled === undefined ? {} : { colorEnabled: options.colorEnabled }),

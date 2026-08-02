@@ -1,13 +1,10 @@
-import { join } from "node:path";
 import {
-	CONFIG_DIR_NAME,
 	type ExtensionAPI,
 	type ExtensionContext,
 	estimateTokens,
 	getAgentDir,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { loadConfig } from "../src/config.js";
 import { createFooterComponent, type ThemeLike } from "../src/footer.js";
 import { createRunActivityTracker, type RunActivityTracker } from "../src/run-activity.js";
 import {
@@ -111,7 +108,6 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 						extensionStatuses,
 					};
 				},
-				getConfig: () => targetRuntime.getConfig(),
 				colorEnabled: !("NO_COLOR" in process.env),
 				requestRender: footerRequestRender,
 				onBranchChange: (callback) =>
@@ -185,15 +181,7 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 			},
 		});
 		try {
-			const userPath = join(getAgentDir(), "pi-mkaz-sidebar.json");
-			const projectPath = join(initializationContext.cwd, CONFIG_DIR_NAME, "pi-mkaz-sidebar.json");
-			const loaded = await loadConfig({
-				userPath,
-				projectPath,
-				projectTrusted: initializationContext.isProjectTrusted(),
-			});
 			if (!isFresh()) return;
-			for (const warning of loaded.warnings) initializationContext.ui.notify(warning, "warning");
 			let autoCompact: boolean | null = null;
 			try {
 				autoCompact = SettingsManager.create(
@@ -208,7 +196,6 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 			const candidateRuntime = new SidebarRuntime({
 				pi,
 				ctx: initializationContext,
-				config: loaded.config,
 				autoCompact,
 				requestRender: () => {
 					if (isFresh() && runtime === localRuntime) requestAllRenders();
@@ -218,7 +205,6 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 			localSidebar = createSidebarController({
 				ctx: initializationContext,
 				getSnapshot: () => getSidebarSnapshot(initializationContext, candidateRuntime, localRunActivity),
-				getConfig: () => candidateRuntime.getConfig(),
 				colorEnabled: !("NO_COLOR" in process.env),
 				shouldAnimate: () => runActivity?.isRunning() ?? false,
 				onError: (error) =>

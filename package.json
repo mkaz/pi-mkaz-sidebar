@@ -1,24 +1,21 @@
 {
-	"name": "pi-mkaz-sidebar",
-	"version": "0.1.0",
-	"description": "My sidebar for Pi",
-	"type": "module",
-	"license": "MIT",
-	"pi": {
-		"extensions": [
-			"./extensions/index.ts"
-		]
-	},
-	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": ">=0.80.7",
-		"@earendil-works/pi-tui": ">=0.80.7"
-	},
-	"devDependencies": {
-		"@earendil-works/pi-coding-agent": "0.80.7",
-		"@earendil-works/pi-tui": "0.80.7"
-	},
-	"engines": {
-		"node": ">=22.19.0"
-	},
-	"private": true
+    "name": "pi-mkaz-sidebar",
+    "version": "0.1.0",
+    "description": "My sidebar for Pi",
+    "type": "module",
+    "author": "mkaz",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/mkaz/pi-mkaz-sidebar"
+    },
+    "pi": {
+        "extensions": [
+            "./extensions/index.ts"
+        ]
+    },
+    "peerDependencies": {
+        "@earendil-works/pi-coding-agent": ">=0.80.7",
+        "@earendil-works/pi-tui": ">=0.80.7"
+    }
 }
