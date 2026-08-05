@@ -12,6 +12,7 @@ import {
 	type RunActivitySnapshot,
 	type ToolActivity,
 } from "./run-activity.js";
+import { type ServerSnapshot } from "./server.js";
 import { createSplitPaneController, type SplitPaneController } from "./split-pane.js";
 import type { SidebarState, WorkspacePulseState } from "./types.js";
 import type { WorkspaceFileChange, WorkspacePulseData } from "./workspace-pulse.js";
@@ -23,6 +24,7 @@ export interface SidebarSnapshotInput {
 	sessionFile?: string;
 	branchEntryCount: number;
 	extensionStatuses: readonly string[];
+	server?: ServerSnapshot;
 	runActivity?: RunActivitySnapshot;
 }
 
@@ -33,6 +35,7 @@ export interface SidebarSnapshot extends SidebarState {
 	sessionFile?: string;
 	persisted: boolean;
 	branchEntryCount: number;
+	server?: ServerSnapshot;
 	runActivity: RunActivitySnapshot;
 }
 
@@ -51,6 +54,7 @@ export function buildSidebarSnapshot(input: SidebarSnapshotInput): SidebarSnapsh
 		...(input.sessionFile ? { sessionFile: input.sessionFile } : {}),
 		persisted: Boolean(input.sessionFile),
 		branchEntryCount: input.branchEntryCount,
+		...(input.server ? { server: input.server } : {}),
 		extensionStatuses: input.extensionStatuses,
 		runActivity: input.runActivity ?? EMPTY_RUN_ACTIVITY,
 	};
@@ -597,6 +601,63 @@ function aggregateActivityText(activity: RunActivitySnapshot): string {
 	return `tools ${completed} done · ${failed} failed`;
 }
 
+function serverSidebarGroups(snapshot: SidebarSnapshot, palette: SidebarPalette): SidebarGroup[] {
+	const server = snapshot.server;
+	if (!server || server.status === "loading" || server.status === "unconfigured" || server.status === "untrusted") {
+		return [];
+	}
+	const command = server.command ? palette.paint("muted", sanitize(server.command)) : "";
+	const rows: string[] = [];
+	let role: PaletteRole = "dim";
+	switch (server.status) {
+		case "stopped":
+			rows.push(palette.paint("muted", "○ stopped"));
+			break;
+		case "starting":
+			role = "working";
+			rows.push(palette.paint(role, "◇ starting"));
+			break;
+		case "running":
+			role = "ready";
+			rows.push(palette.paint(role, "● running"));
+			break;
+		case "stopping":
+			role = "working";
+			rows.push(palette.paint(role, "◌ stopping"));
+			break;
+		case "exited":
+			role = server.detail === "exit 0" ? "muted" : "warning";
+			rows.push(palette.paint(role, `○ ${server.detail ?? "exited"}`));
+			break;
+		case "error":
+			role = "error";
+			rows.push(palette.paint(role, `✕ ${sanitize(server.detail ?? "") || "unavailable"}`));
+			break;
+		default:
+			return [];
+	}
+	if (command) rows.push(command);
+	if (server.url) rows.push(palette.paint("accent", sanitize(server.url)));
+	if (server.status !== "stopped") {
+		rows.push(
+			...(server.output ?? [])
+				.map((line) => sanitize(line))
+				.filter(Boolean)
+				.map((line) => palette.paint("dim", `› ${line}`)),
+		);
+	}
+	return [
+		{
+			name: "server",
+			panel: "SERVER",
+			panelRole: role,
+			rows,
+			required: false,
+			dropRank: 70,
+		},
+	];
+}
+
 function activitySidebarGroups(
 	snapshot: SidebarSnapshot,
 	contentWidth: number,
@@ -775,6 +836,7 @@ export function renderSidebarLines(
 			required: false,
 			dropRank: 10 + (files.length - index) / 100,
 		})),
+		...serverSidebarGroups(snapshot, palette),
 	];
 	return renderDock(
 		renderGroups(

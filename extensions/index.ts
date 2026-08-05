@@ -6,6 +6,7 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { createFooterComponent, type ThemeLike } from "../src/footer.js";
+import { ServerRunner } from "../src/server.js";
 import { createRunActivityTracker, type RunActivityTracker } from "../src/run-activity.js";
 import {
 	buildSidebarSnapshot,
@@ -23,6 +24,7 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 	let requestRender: () => void = () => undefined;
 	let sidebar: SidebarController | undefined;
 	let runActivity: RunActivityTracker | undefined;
+	let server: ServerRunner | undefined;
 	let extensionStatuses: readonly string[] = [];
 	let enabled = true;
 	let lifecycleGeneration = 0;
@@ -47,6 +49,7 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 		ctx: ExtensionContext,
 		targetRuntime: SidebarRuntime,
 		targetRunActivity: RunActivityTracker | undefined,
+		targetServer: ServerRunner | undefined,
 	): SidebarSnapshot {
 		const sessionName = ctx.sessionManager.getSessionName();
 		const sessionFile = ctx.sessionManager.getSessionFile();
@@ -57,6 +60,7 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 			...(sessionFile ? { sessionFile } : {}),
 			branchEntryCount: ctx.sessionManager.getBranch().length,
 			extensionStatuses,
+			...(targetServer ? { server: targetServer.getSnapshot() } : {}),
 			...(targetRunActivity ? { runActivity: targetRunActivity.getSnapshot() } : {}),
 		});
 	}
@@ -67,6 +71,7 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 				runtime: SidebarRuntime | undefined;
 				sidebar: SidebarController | undefined;
 				runActivity: RunActivityTracker | undefined;
+				server: ServerRunner | undefined;
 		  }
 		| undefined {
 		if (ctx === undefined || currentContext === undefined || currentSessionManager === undefined)
@@ -76,9 +81,41 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 		} catch {
 			return undefined;
 		}
-		return { ctx: currentContext, runtime, sidebar, runActivity };
+		return { ctx: currentContext, runtime, sidebar, runActivity, server };
 	}
 
+
+	function describeServer(targetServer: ServerRunner): string {
+		const snapshot = targetServer.getSnapshot();
+		const command = snapshot.command ? ` (${snapshot.command})` : "";
+		const detail = snapshot.detail ? `: ${snapshot.detail}` : "";
+		return `Server ${snapshot.status}${command}${detail}`;
+	}
+
+	async function handleServerCommand(args: string, ctx: ExtensionContext): Promise<void> {
+		const parts = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
+		const [action] = parts;
+		if (parts.length > 1 || ![undefined, "start", "stop", "restart", "status"].includes(action)) {
+			ctx.ui.notify("Usage: /server [start|stop|restart|status]", "warning");
+			return;
+		}
+		const current = getCurrentContextState(ctx);
+		if (!current?.server) {
+			ctx.ui.notify("Pi Mkaz Sidebar server control is not active in this session", "warning");
+			return;
+		}
+		if (action === undefined || action === "status") {
+			ctx.ui.notify(describeServer(current.server), "info");
+			return;
+		}
+		const message =
+			action === "start"
+				? current.server.start()
+				: action === "stop"
+					? await current.server.stop()
+					: await current.server.restart();
+		ctx.ui.notify(message, current.server.getSnapshot().status === "error" ? "error" : "info");
+	}
 
 	function installFooter(
 		ctx: ExtensionContext,
@@ -125,6 +162,10 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 		handler: async (args, ctx) => {
 			const parts = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
 			const [action, ...extra] = parts;
+			if (action === "server") {
+				await handleServerCommand(extra.join(" "), ctx);
+				return;
+			}
 			if (action === "on" || action === "off") {
 				if (ctx.mode !== "tui") {
 					ctx.ui.notify("Pi Mkaz Sidebar requires TUI mode", "warning");
@@ -162,8 +203,13 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 					return;
 				}
 				sidebar.toggle();
-			} else ctx.ui.notify("Usage: /sidebar [on|off|disable|enable]", "warning");
+			} else ctx.ui.notify("Usage: /sidebar [on|off|disable|enable|server]", "warning");
 		},
+	});
+
+	pi.registerCommand("server", {
+		description: "Control the configured project server",
+		handler: (args, ctx) => handleServerCommand(args, ctx),
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -173,6 +219,7 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 
 		let localRuntime: SidebarRuntime | undefined;
 		let localSidebar: SidebarController | undefined;
+		let localServer: ServerRunner | undefined;
 		const isFresh = (): boolean => initializationGeneration === lifecycleGeneration;
 		const localRunActivity = createRunActivityTracker({
 			cwd: initializationContext.cwd,
@@ -202,9 +249,16 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 				},
 			});
 			localRuntime = candidateRuntime;
+			localServer = new ServerRunner({
+				cwd: initializationContext.cwd,
+				trusted: initializationContext.isProjectTrusted(),
+				onChange: () => {
+					if (isFresh() && server === localServer) requestAllRenders();
+				},
+			});
 			localSidebar = createSidebarController({
 				ctx: initializationContext,
-				getSnapshot: () => getSidebarSnapshot(initializationContext, candidateRuntime, localRunActivity),
+				getSnapshot: () => getSidebarSnapshot(initializationContext, candidateRuntime, localRunActivity, localServer),
 				colorEnabled: !("NO_COLOR" in process.env),
 				shouldAnimate: () => runActivity?.isRunning() ?? false,
 				onError: (error) =>
@@ -213,25 +267,30 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 						"error",
 					),
 			});
+			await localServer.load();
 			if (!isFresh()) {
 				localSidebar.dispose();
 				localRunActivity.reset();
 				candidateRuntime.dispose();
+				await localServer.dispose();
 				return;
 			}
 
 			const previousSidebar = sidebar;
 			const previousRuntime = runtime;
 			const previousRunActivity = runActivity;
+			const previousServer = server;
 			runtime = candidateRuntime;
 			sidebar = localSidebar;
 			runActivity = localRunActivity;
+			server = localServer;
 			currentContext = initializationContext;
 			currentSessionManager = initializationContext.sessionManager;
 			extensionStatuses = [];
 			previousSidebar?.dispose();
 			previousRuntime?.dispose();
 			previousRunActivity?.reset();
+			void previousServer?.dispose();
 
 			if (enabled && isFresh()) {
 				installFooter(initializationContext, candidateRuntime, localRunActivity, initializationGeneration);
@@ -242,6 +301,7 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 			localSidebar?.dispose();
 			localRunActivity.reset();
 			localRuntime?.dispose();
+			await localServer?.dispose();
 			if (!isFresh()) return;
 			sidebar?.dispose();
 			sidebar = undefined;
@@ -249,7 +309,10 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 			runtime = undefined;
 			const previousRunActivity = runActivity;
 			runActivity = undefined;
+			const previousServer = server;
+			server = undefined;
 			previousRunActivity?.reset();
+			await previousServer?.dispose();
 			currentContext = undefined;
 			currentSessionManager = undefined;
 			updateExtensionStatuses([]);
@@ -313,7 +376,7 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 	pi.on("thinking_level_select", (_event, ctx) => getCurrentContextState(ctx)?.runtime?.refreshUsage());
 	pi.on("session_compact", (_event, ctx) => getCurrentContextState(ctx)?.runtime?.refreshUsage());
 	pi.on("session_info_changed", (_event, ctx) => getCurrentContextState(ctx)?.runtime?.refreshUsage());
-	pi.on("session_shutdown", (_event, ctx) => {
+	pi.on("session_shutdown", async (_event, ctx) => {
 		const current = getCurrentContextState(ctx);
 		if (!current && currentContext !== undefined) return;
 		lifecycleGeneration += 1;
@@ -323,7 +386,10 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 		runtime = undefined;
 		const previousRunActivity = current?.runActivity ?? runActivity;
 		runActivity = undefined;
+		const previousServer = current?.server ?? server;
+		server = undefined;
 		previousRunActivity?.reset();
+		await previousServer?.dispose();
 		current?.ctx.ui.setFooter(undefined);
 		currentContext = undefined;
 		currentSessionManager = undefined;
