@@ -1,44 +1,36 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
-const CONFIG_FILE_NAME = "mkaz-sidebar.json";
+const JUSTFILE_NAMES = ["justfile", ".justfile", "Justfile", ".Justfile"];
 const STOP_GRACE_MS = 3_000;
 const MAX_OUTPUT_LINES = 3;
 const MAX_OUTPUT_LINE_LENGTH = 2_000;
 
-export type ServerStatus =
+export type JustfileStatus =
 	| "loading"
-	| "unconfigured"
+	| "missing"
 	| "untrusted"
 	| "stopped"
-	| "starting"
 	| "running"
 	| "stopping"
 	| "exited"
 	| "error";
 
-export interface ServerSnapshot {
-	status: ServerStatus;
+export interface JustfileSnapshot {
+	status: JustfileStatus;
 	command?: string;
-	url?: string;
 	detail?: string;
 	output?: readonly string[];
 }
 
-export interface ServerRunnerOptions {
+export interface JustfileRunnerOptions {
 	cwd: string;
 	trusted: boolean;
 	onChange(): void;
 }
 
-interface ServerConfig {
-	serverCommand?: unknown;
-	serverUrl?: unknown;
-}
-
-export class ServerRunner {
+export class JustfileRunner {
 	readonly #cwd: string;
 	readonly #trusted: boolean;
 	readonly #onChange: () => void;
@@ -47,23 +39,22 @@ export class ServerRunner {
 	#stopTimer: ReturnType<typeof setTimeout> | undefined;
 	#stopPromise: Promise<void> | undefined;
 	#finishStop: (() => void) | undefined;
-	#command: string | undefined;
-	#url: string | undefined;
+	#justfile: string | undefined;
+	#args: string[] | undefined;
 	#output: string[] = [];
 	#outputPartial = "";
 	#disposed = false;
-	#snapshot: ServerSnapshot = { status: "loading" };
+	#snapshot: JustfileSnapshot = { status: "loading" };
 
-	constructor(options: ServerRunnerOptions) {
+	constructor(options: JustfileRunnerOptions) {
 		this.#cwd = options.cwd;
 		this.#trusted = options.trusted;
 		this.#onChange = options.onChange;
 	}
 
-	getSnapshot(): ServerSnapshot {
+	getSnapshot(): JustfileSnapshot {
 		return this.#snapshot;
 	}
-
 
 	async load(): Promise<void> {
 		if (this.#disposed) return;
@@ -72,41 +63,37 @@ export class ServerRunner {
 			return;
 		}
 
-		try {
-			const config = JSON.parse(
-				await readFile(join(this.#cwd, CONFIG_DIR_NAME, CONFIG_FILE_NAME), "utf8"),
-			) as ServerConfig;
-			const command = typeof config.serverCommand === "string" ? config.serverCommand.trim() : "";
-			this.#command = command || undefined;
-			this.#url = typeof config.serverUrl === "string" ? config.serverUrl.trim() || undefined : undefined;
-			this.#output = [];
-			this.#outputPartial = "";
-			this.#setState(command ? "stopped" : "unconfigured");
-		} catch (error) {
-			this.#command = undefined;
-			this.#url = undefined;
-			this.#output = [];
-			this.#outputPartial = "";
-			if (isMissingFile(error)) {
-				this.#setState("unconfigured");
-				return;
-			}
-			this.#setState("error", errorMessage(error));
-		}
-	}
-
-	start(): string {
-		if (this.#disposed) return "Server runner is unavailable";
-		if (this.#child) return "Server is already running";
-		if (this.#stopping) return "Server is still stopping";
-		const command = this.#command;
-		if (!command) return this.#snapshot.detail ?? "No serverCommand is configured";
-
+		this.#justfile = undefined;
+		this.#args = undefined;
 		this.#output = [];
 		this.#outputPartial = "";
-		this.#setState("starting");
+		for (const name of JUSTFILE_NAMES) {
+			try {
+				await readFile(join(this.#cwd, name), "utf8");
+				this.#justfile = name;
+				this.#setState("stopped");
+				return;
+			} catch (error) {
+				if (isMissingFile(error)) continue;
+				this.#setState("error", errorMessage(error));
+				return;
+			}
+		}
+		this.#setState("missing");
+	}
+
+	start(args: readonly string[]): string {
+		if (this.#disposed) return "Justfile runner is unavailable";
+		if (this.#child) return "A just recipe is already running";
+		if (this.#stopping) return "A just recipe is still stopping";
+		if (!this.#justfile) return this.#snapshot.detail ?? "No justfile was found";
+		if (args.length === 0) return "Specify a just recipe";
+
+		this.#args = [...args];
+		this.#output = [];
+		this.#outputPartial = "";
 		try {
-			const child = spawn(shell(), shellArgs(command), {
+			const child = spawn("just", ["--justfile", this.#justfile, ...args], {
 				cwd: this.#cwd,
 				env: process.env,
 				detached: process.platform !== "win32",
@@ -135,20 +122,20 @@ export class ServerRunner {
 				this.#setState("exited", detail);
 			});
 			this.#setState("running");
-			return "Server started";
+			return `Started just ${args.join(" ")}`;
 		} catch (error) {
 			this.#setState("error", errorMessage(error));
-			return `Could not start server: ${errorMessage(error)}`;
+			return `Could not start just: ${errorMessage(error)}`;
 		}
 	}
 
 	async stop(): Promise<string> {
 		if (this.#stopping && this.#stopPromise) {
 			await this.#stopPromise;
-			return "Server stopped";
+			return "Just recipe stopped";
 		}
 		const child = this.#child;
-		if (!child) return "Server is not running";
+		if (!child) return "No just recipe is running";
 		this.#stopping = child;
 		this.#setState("stopping");
 		this.#stopPromise = new Promise((resolve) => {
@@ -171,12 +158,13 @@ export class ServerRunner {
 			this.#completeStop(child);
 		}
 		await this.#stopPromise;
-		return "Server stopped";
+		return "Just recipe stopped";
 	}
 
 	async restart(): Promise<string> {
+		if (!this.#args) return "No just recipe has been run";
 		if (this.#child || this.#stopping) await this.stop();
-		return this.start();
+		return this.start(this.#args);
 	}
 
 	async dispose(): Promise<void> {
@@ -200,7 +188,7 @@ export class ServerRunner {
 	}
 
 	#signal(child: ChildProcess, signal: NodeJS.Signals): void {
-		if (!child.pid) throw new Error("Server process has no PID");
+		if (!child.pid) throw new Error("Just process has no PID");
 		if (process.platform === "win32") {
 			child.kill(signal);
 			return;
@@ -227,29 +215,20 @@ export class ServerRunner {
 		this.#output = this.#output.slice(-MAX_OUTPUT_LINES);
 	}
 
-	#setState(status: ServerStatus, detail?: string): void {
+	#setState(status: JustfileStatus, detail?: string): void {
 		this.#setSnapshot({
 			status,
-			...(this.#command ? { command: this.#command } : {}),
-			...(this.#url ? { url: this.#url } : {}),
+			...(this.#args ? { command: `just ${this.#args.join(" ")}` } : {}),
 			...(detail ? { detail } : {}),
 			...(this.#output.length > 0 ? { output: [...this.#output] } : {}),
 		});
 	}
 
-	#setSnapshot(snapshot: ServerSnapshot): void {
+	#setSnapshot(snapshot: JustfileSnapshot): void {
 		if (this.#disposed && snapshot.status !== "stopped") return;
 		this.#snapshot = snapshot;
 		this.#onChange();
 	}
-}
-
-function shell(): string {
-	return process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : (process.env.SHELL ?? "/bin/sh");
-}
-
-function shellArgs(command: string): string[] {
-	return process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-lc", command];
 }
 
 function isMissingFile(error: unknown): error is NodeJS.ErrnoException {

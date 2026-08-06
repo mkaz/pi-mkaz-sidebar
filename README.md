@@ -1,6 +1,6 @@
 # Pi mkaz Sidebar
 
-A fixed activity sidebar for [Pi](https://pi.dev). The sidebar displays session, tool, workspace, context, and usage detail, with optional control of one project server command. Updates the footer to minimal status line since the sidebar now contains most of the information.
+A fixed activity sidebar for [Pi](https://pi.dev). The sidebar displays session, tool, workspace, context, and usage detail, with optional access to recipes in a project justfile. Updates the footer to minimal status line since the sidebar now contains most of the information.
 
 ![Screenshot of Sidebar in Pi Coding Harness](https://github.com/user-attachments/assets/e68ecccf-53f8-4d85-8663-0ce01720f02e)
 
@@ -32,25 +32,24 @@ Or you can add a symlink in a project's `.pi/` directory.
 /sidebar                         # toggle the sidebar
 /sidebar on|off                  # show or hide the sidebar
 /sidebar disable|enable
-/server [start|stop|restart|status]
+/just [recipe [arguments...]]
+/just --stop|--restart|--status
 ```
 
 The sidebar is 44 columns wide and appears only when the terminal has enough room to preserve 64 columns for Pi. It has no resize mode, mouse handling, or terminal-input interception.
 
-## Server command
+## Justfile recipes
 
-Optionally configure one project server command in `.pi/mkaz-sidebar.json`:
+If the trusted project has a `justfile` (also `.justfile`, `Justfile`, or `.Justfile`) and [`just`](https://just.systems/) is installed, run its recipes directly with `/just`:
 
-```json
-{
-  "serverCommand": "npm run dev",
-  "serverUrl": "http://localhost:3000"
-}
+```text
+/just test
+/just run --port 3000
 ```
 
-The command runs from the project root. It can be any shell command, such as `just run` or `just serve`. `serverUrl` is optional and is displayed in the sidebar. Start, stop, and restart with `/server ...`. The sidebar keeps the last three non-empty lines of combined standard output and error, truncating them to its width. Pi stops the process when the session shuts down.
+The recipe runs from the project root. The sidebar displays its status, command, and the last three non-empty lines of combined standard output and error in a `JUSTFILE` panel. Use `/just --stop` to stop a long-running recipe, `/just --restart` to rerun the most recent recipe, or `/just --status` (or `/just`) for its status. Pi stops a running recipe when the session shuts down.
 
-After adding or changing the file, restart Pi or use `/reload` before starting the server.
+The extension reads the justfile when the session starts. After adding or changing one, restart Pi or use `/reload`.
 
 ## Customization
 
@@ -58,10 +57,10 @@ The sidebar is intentionally fixed to its built-in defaults and uses Pi's config
 
 ## Privacy and local behavior
 
-- Makes no telemetry, analytics, or external network requests. A configured server command may make its own connections.
+- Makes no telemetry, analytics, or external network requests. A just recipe may make its own connections.
 - Does not store prompts, responses, credentials, or session content.
 - Reads Pi usage/session metadata to render the sidebar.
-- Reads `.pi/mkaz-sidebar.json` only for trusted projects when server control is configured.
+- Reads project justfiles only for trusted projects.
 - Runs read-only Git inspection to summarize the worktree; untracked file contents are never read.
 
 ## License
