@@ -50,3 +50,11 @@ export interface SidebarState {
 export interface FooterState extends SidebarState {
 	performance?: ResponsePerformance;
 }
+
+/**
+ * Strip a `accounts/<vendor>/models/` prefix from a model id (Fireworks-style
+ * vendor APIs return this shape). Leaves other ids unchanged.
+ */
+export function shortModelId(modelId: string): string {
+	return modelId.replace(/^accounts\/[^/]+\/models\//, "");
+}

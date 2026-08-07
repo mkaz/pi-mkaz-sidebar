@@ -1,6 +1,6 @@
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { createPalette, effortRole, type PaletteRole } from "./palette.js";
-import type { SidebarState, FooterState } from "./types.js";
+import { shortModelId, type SidebarState, type FooterState } from "./types.js";
 
 export interface ThemeLike {
 	readonly name?: string;
@@ -31,10 +31,12 @@ function activityText(state: SidebarState, theme: ThemeLike, colorEnabled: boole
 
 function modelText(state: FooterState, theme: ThemeLike, colorEnabled: boolean): string {
 	const palette = createPalette(theme, colorEnabled);
-	const model = state.modelId ? sanitize(state.modelId) : "";
-	const effort = state.thinkingLevel ? sanitize(state.thinkingLevel) : "";
+	const model = state.modelId ? sanitize(shortModelId(state.modelId)) : "";
 	if (!model) return "";
-	return [palette.paint("primary", model), effort ? palette.paint(effortRole(effort), effort) : ""]
+	const provider = state.provider ? palette.paint("muted", `(${sanitize(state.provider)})`) : "";
+	const effort = state.thinkingLevel ? sanitize(state.thinkingLevel) : "";
+	const modelAndProvider = [palette.paint("primary", model), provider].filter(Boolean).join(" ");
+	return [modelAndProvider, effort ? palette.paint(effortRole(effort), effort) : ""]
 		.filter(Boolean)
 		.join(" · ");
 }

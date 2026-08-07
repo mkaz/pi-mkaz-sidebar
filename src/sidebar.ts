@@ -14,7 +14,7 @@ import {
 } from "./run-activity.js";
 import { type JustfileSnapshot } from "./justfile.js";
 import { createSplitPaneController, type SplitPaneController } from "./split-pane.js";
-import type { SidebarState, WorkspacePulseState } from "./types.js";
+import { shortModelId, type SidebarState, type WorkspacePulseState } from "./types.js";
 import type { WorkspaceFileChange, WorkspacePulseData } from "./workspace-pulse.js";
 
 export interface SidebarSnapshotInput {
@@ -169,7 +169,7 @@ function agentRows(
 			`${activitySymbol(snapshot.activity)} ${activity || "—"}`,
 		),
 	);
-	const model = snapshot.modelId ? palette.paint("primary", display(snapshot.modelId)) : "";
+	const model = snapshot.modelId ? palette.paint("primary", display(shortModelId(snapshot.modelId))) : "";
 	const thinking = snapshot.thinkingLevel
 		? palette.paint(effortRole(snapshot.thinkingLevel), display(snapshot.thinkingLevel))
 		: "";
