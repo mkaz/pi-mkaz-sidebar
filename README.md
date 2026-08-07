@@ -9,12 +9,19 @@ A fixed activity sidebar for [Pi](https://pi.dev). The sidebar displays session,
 I recommend cloning/forking the repo and customizing to your own taste.
 
 
-**Development:** To clone and launch Pi loading the extension:
+**Development:** To clone, install dev dependencies, and launch Pi loading the extension:
 
 ```bash
 git clone https://github.com/mkaz/pi-mkaz-sidebar
 cd pi-mkaz-sidebar
+npm install
 pi -e .
+```
+
+Typecheck the sources with:
+
+```bash
+npm run check
 ```
 
 **Install:** To make available to all instances, create symlink:
