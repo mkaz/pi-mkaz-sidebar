@@ -10,10 +10,10 @@ import {
 	formatDuration,
 	formatResponsePerformance,
 	type RunActivitySnapshot,
-	type ToolActivity,
 } from "./run-activity.js";
 import { type JustfileSnapshot } from "./justfile.js";
 import { createSplitPaneController, type SplitPaneController } from "./split-pane.js";
+import type { TodoSnapshot, TodoTask } from "./todo.js";
 import { shortModelId, type SidebarState, type WorkspacePulseState } from "./types.js";
 import type { WorkspaceFileChange, WorkspacePulseData } from "./workspace-pulse.js";
 
@@ -24,8 +24,10 @@ export interface SidebarSnapshotInput {
 	sessionFile?: string;
 	branchEntryCount: number;
 	extensionStatuses: readonly string[];
+	showUsage: boolean;
 	justfile?: JustfileSnapshot;
 	runActivity?: RunActivitySnapshot;
+	todo?: TodoSnapshot;
 }
 
 export interface SidebarSnapshot extends SidebarState {
@@ -35,8 +37,10 @@ export interface SidebarSnapshot extends SidebarState {
 	sessionFile?: string;
 	persisted: boolean;
 	branchEntryCount: number;
+	showUsage: boolean;
 	justfile?: JustfileSnapshot;
 	runActivity: RunActivitySnapshot;
+	todo?: TodoSnapshot;
 }
 
 function workspacePulseData(pulse: WorkspacePulseState): WorkspacePulseData | undefined {
@@ -54,7 +58,9 @@ export function buildSidebarSnapshot(input: SidebarSnapshotInput): SidebarSnapsh
 		...(input.sessionFile ? { sessionFile: input.sessionFile } : {}),
 		persisted: Boolean(input.sessionFile),
 		branchEntryCount: input.branchEntryCount,
+		showUsage: input.showUsage,
 		...(input.justfile ? { justfile: input.justfile } : {}),
+		...(input.todo ? { todo: input.todo } : {}),
 		extensionStatuses: input.extensionStatuses,
 		runActivity: input.runActivity ?? EMPTY_RUN_ACTIVITY,
 	};
@@ -149,26 +155,12 @@ function activityRole(activity: SidebarSnapshot["activity"]): PaletteRole {
 	return "ready";
 }
 
-function activitySymbol(activity: SidebarSnapshot["activity"]): string {
-	if (activity === "error") return "✕";
-	if (activity === "warning") return "▲";
-	if (activity === "working") return "◆";
-	return "●";
-}
-
 function agentRows(
 	snapshot: SidebarSnapshot,
 	contentWidth: number,
 	palette: SidebarPalette,
-	theme: ThemeLike,
+	now: number,
 ): string[] {
-	const activity = `${snapshot.activity.slice(0, 1).toUpperCase()}${snapshot.activity.slice(1)}`;
-	const status = theme.bold(
-		palette.paint(
-			activityRole(snapshot.activity),
-			`${activitySymbol(snapshot.activity)} ${activity || "—"}`,
-		),
-	);
 	const model = snapshot.modelId ? palette.paint("primary", display(shortModelId(snapshot.modelId))) : "";
 	const thinking = snapshot.thinkingLevel
 		? palette.paint(effortRole(snapshot.thinkingLevel), display(snapshot.thinkingLevel))
@@ -176,8 +168,10 @@ function agentRows(
 	const provider = snapshot.provider ? palette.paint("muted", `(${display(snapshot.provider)})`) : "";
 	const separator = ` ${palette.paint("dim", "·")} `;
 	const modelAndThinking = [model, thinking].filter(Boolean).join(separator) || palette.paint("dim", "—");
+	const modelRow = provider ? spacedRow(modelAndThinking, provider, contentWidth) : modelAndThinking;
+	const activity = agentActivityRows(snapshot.runActivity, palette, now);
 
-	return [status, provider ? spacedRow(modelAndThinking, provider, contentWidth) : modelAndThinking];
+	return activity.length > 0 ? [modelRow, "", ...activity] : [modelRow];
 }
 
 function pulseIndicator(pulse: WorkspacePulseState): { symbol: string; role: PaletteRole } {
@@ -457,13 +451,6 @@ function statusDetailRows(snapshot: SidebarSnapshot, palette: SidebarPalette): s
 	];
 }
 
-interface ActivityGroups {
-	core: string[];
-	active: Array<{ id: string; row: string }>;
-	recent: Array<{ id: string; row: string }>;
-	aggregate: string[];
-}
-
 interface SidebarGroup {
 	name: string;
 	panel?: string;
@@ -514,91 +501,63 @@ function renderGroups(
 	return rendered;
 }
 
-function durationForTool(tool: ToolActivity, now: number): string {
-	return formatDuration(tool.durationMs ?? Math.max(0, now - tool.startedAt));
-}
-
-function toolStatusRole(status: ToolActivity["status"]): PaletteRole {
-	if (status === "failed") return "error";
-	if (status === "running") return "working";
-	return "ready";
-}
-
-function toolStatusLabel(tool: ToolActivity, now: number): string {
-	const duration = durationForTool(tool, now);
-	if (tool.status === "running") return duration;
-	return `${tool.status} ${duration}`;
-}
-
-function toolActivityRow(
-	tool: ToolActivity,
-	contentWidth: number,
-	palette: SidebarPalette,
-	now: number,
-): string {
-	const safeName = sanitize(tool.name) || "tool";
-	const safeSummary = sanitize(tool.summary);
-	const status = toolStatusLabel(tool, now);
-	const statusWidth = visibleWidth(status);
-	const nameWidth = Math.min(Math.max(visibleWidth(safeName), 4), 10, Math.max(0, contentWidth));
-	const summaryWidth = Math.max(0, contentWidth - nameWidth - statusWidth - 2);
-	const statusText = truncateToWidth(status, Math.max(0, contentWidth - nameWidth - summaryWidth - 2), "");
-	const row = `${padToWidth(palette.paint("muted", safeName), nameWidth)} ${padToWidth(
-		palette.paint(safeSummary ? "primary" : "dim", safeSummary || "—"),
-		summaryWidth,
-	)} ${palette.paint(toolStatusRole(tool.status), statusText)}`;
-	return truncateToWidth(row, contentWidth, "");
-}
-
 function runSummaryRow(activity: RunActivitySnapshot, palette: SidebarPalette, now: number): string {
-	if (activity.phase === "idle") return palette.paint("ready", "Ready");
 	const duration =
 		activity.phase === "settled"
 			? formatDuration(activity.durationMs ?? Math.max(0, now - (activity.startedAt ?? now)))
 			: formatDuration(Math.max(0, now - (activity.startedAt ?? now)));
-	const role: PaletteRole =
-		activity.phase === "running" ? "working" : activity.failedCount > 0 ? "error" : "ready";
-	if (activity.phase === "settled") return palette.paint(role, `Last run · ${duration}`);
-
-	const label = activity.turnNumber === undefined ? "Run" : `Turn ${finiteCount(activity.turnNumber)}`;
-	return palette.paint(role, `${label} · ${activity.phase} ${duration}`);
+	const turnCount = activity.turnNumber === undefined ? undefined : finiteCount(activity.turnNumber);
+	const label =
+		turnCount === undefined
+			? "Run"
+			: activity.phase === "running"
+				? `Turn ${turnCount}`
+				: `${turnCount} ${turnCount === 1 ? "turn" : "turns"}`;
+	return palette.paint(activity.phase === "running" ? "working" : "ready", `${label} · ${duration}`);
 }
 
-function responsePerformanceRow(activity: RunActivitySnapshot, palette: SidebarPalette): string {
-	return palette.paint("output", formatResponsePerformance(activity.performance));
-}
-
-function activityRows(
+function agentActivityRows(
 	activity: RunActivitySnapshot,
-	contentWidth: number,
 	palette: SidebarPalette,
 	now: number,
-): ActivityGroups {
-	const activeIds = new Set(activity.activeTools.map((tool) => tool.id));
-	const active = activity.activeTools
-		.map((tool, index) => ({ index, tool }))
-		.sort((left, right) => left.tool.startedAt - right.tool.startedAt || left.index - right.index)
-		.map(({ tool }) => ({ id: tool.id, row: toolActivityRow(tool, contentWidth, palette, now) }));
-	const recent = activity.recentTools
-		.filter((tool) => !activeIds.has(tool.id))
-		.slice(0, 3)
-		.map((tool) => ({ id: tool.id, row: toolActivityRow(tool, contentWidth, palette, now) }));
-	const aggregateText = aggregateActivityText(activity);
-	return {
-		core: [runSummaryRow(activity, palette, now), responsePerformanceRow(activity, palette)],
-		active,
-		recent,
-		aggregate: aggregateText
-			? [palette.paint(activity.failedCount > 0 ? "error" : "ready", aggregateText)]
-			: [],
-	};
+): string[] {
+	if (activity.phase === "idle") return [];
+	const rows = [runSummaryRow(activity, palette, now)];
+	if (activity.phase === "running") {
+		rows.push(palette.paint("output", formatResponsePerformance(activity.performance)));
+	}
+	return rows;
 }
 
-function aggregateActivityText(activity: RunActivitySnapshot): string {
-	const completed = finiteCount(activity.completedCount);
-	const failed = finiteCount(activity.failedCount);
-	if (completed === 0 && failed === 0) return "";
-	return `tools ${completed} done · ${failed} failed`;
+function todoTaskRow(task: TodoTask, palette: SidebarPalette): string {
+	const id = palette.paint("muted", `#${finiteCount(task.id)}`);
+	if (task.status === "in_progress") {
+		const active = task.activeForm ? ` (${sanitize(task.activeForm)})` : "";
+		return `${palette.paint("working", "◐")} ${id} ${palette.paint("primary", sanitize(task.subject))}${palette.paint("dim", active)}`;
+	}
+	if (task.status === "completed") {
+		return `${palette.paint("success", "✓")} ${id} ${palette.paint("dim", sanitize(task.subject))}`;
+	}
+	return `${palette.paint("dim", "○")} ${id} ${palette.paint("primary", sanitize(task.subject))}`;
+}
+
+function todoSidebarGroups(snapshot: SidebarSnapshot, palette: SidebarPalette): SidebarGroup[] {
+	const tasks = snapshot.todo?.tasks ?? [];
+	if (tasks.length === 0) return [];
+	const order = { in_progress: 0, pending: 1, completed: 2 } as const;
+	const sorted = tasks
+		.map((task, index) => ({ task, index }))
+		.sort((left, right) => order[left.task.status] - order[right.task.status] || left.index - right.index);
+	const completed = tasks.filter((task) => task.status === "completed").length;
+	const panel = `TODO ${completed}/${tasks.length}`;
+	return sorted.map(({ task }) => ({
+		name: `todo:${task.id}`,
+		panel,
+		panelRole: task.status === "in_progress" ? "working" : "accent",
+		rows: [todoTaskRow(task, palette)],
+		required: false,
+		dropRank: task.status === "in_progress" ? 96 : task.status === "pending" ? 92 : 42,
+	}));
 }
 
 function justfileSidebarGroups(snapshot: SidebarSnapshot, palette: SidebarPalette): SidebarGroup[] {
@@ -653,56 +612,6 @@ function justfileSidebarGroups(snapshot: SidebarSnapshot, palette: SidebarPalett
 	];
 }
 
-function activitySidebarGroups(
-	snapshot: SidebarSnapshot,
-	contentWidth: number,
-	palette: SidebarPalette,
-	now: number,
-): SidebarGroup[] {
-	const groups = activityRows(snapshot.runActivity, contentWidth, palette, now);
-	const recentCount = groups.recent.length;
-	const panelRole: PaletteRole =
-		snapshot.runActivity.phase === "running"
-			? "working"
-			: snapshot.runActivity.failedCount > 0
-				? "error"
-				: "ready";
-	return [
-		{
-			name: "activityCore",
-			panel: "ACTIVITY",
-			panelRole,
-			rows: groups.core,
-			required: true,
-			dropRank: Number.POSITIVE_INFINITY,
-		},
-		...groups.active.map((active, index, rows) => ({
-			name: `activityActive:${active.id}`,
-			panel: "ACTIVITY",
-			panelRole,
-			rows: [active.row],
-			required: false,
-			dropRank: 35 + (rows.length - index) / 100,
-		})),
-		...groups.recent.map((recent, index) => ({
-			name: `activityRecent:${recent.id}`,
-			panel: "ACTIVITY",
-			panelRole,
-			rows: [recent.row],
-			required: false,
-			dropRank: index === 0 ? 30 : 10 + (recentCount - index - 1),
-		})),
-		{
-			name: "activityAggregate",
-			panel: "ACTIVITY",
-			panelRole,
-			rows: groups.aggregate,
-			required: false,
-			dropRank: 20,
-		},
-	].filter((group) => group.rows.length > 0);
-}
-
 function composeGroups(
 	groups: SidebarGroup[],
 	height: number,
@@ -750,15 +659,11 @@ export function renderSidebarLines(
 			panel: "AGENT",
 			panelRole: activityRole(snapshot.activity),
 			panelJewel: snapshot.activity === "working" && Math.floor(now / 400) % 2 === 1 ? "✧" : "✦",
-			rows: agentRows(snapshot, panelContentWidth, palette, theme),
+			rows: agentRows(snapshot, panelContentWidth, palette, now),
 			required: true,
 			dropRank: Number.POSITIVE_INFINITY,
 		},
-		...activitySidebarGroups(snapshot, panelContentWidth, palette, now).map((group) => ({
-			...group,
-			required: group.name === "activityCore",
-			dropRank: group.name === "activityCore" ? Number.POSITIVE_INFINITY : group.dropRank + 40,
-		})),
+		...todoSidebarGroups(snapshot, palette),
 		{
 			name: "statusDetails",
 			panel: "ALERTS",
@@ -787,7 +692,9 @@ export function renderSidebarLines(
 			name: "usage",
 			panel: "USAGE",
 			panelRole: "output",
-			rows: usageRows(snapshot, panelContentWidth, layout, palette),
+			rows: snapshot.showUsage
+				? usageRows(snapshot, panelContentWidth, layout, palette)
+				: [],
 			required: false,
 			dropRank: 20,
 		},

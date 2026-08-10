@@ -1,6 +1,6 @@
 # Pi mkaz Sidebar
 
-A fixed activity sidebar for [Pi](https://pi.dev). The sidebar displays session, tool, workspace, context, and usage detail, with optional access to recipes in a project justfile. Updates the footer to minimal status line since the sidebar now contains most of the information.
+A fixed activity sidebar for [Pi](https://pi.dev). The sidebar displays agent, session, workspace, context, and optional usage details, with access to recipes in a project justfile. It also replaces the footer with a minimal status line.
 
 ![Screenshot of Sidebar in Pi Coding Harness](https://github.com/user-attachments/assets/e68ecccf-53f8-4d85-8663-0ce01720f02e)
 
@@ -58,14 +58,33 @@ The recipe runs from the project root. The sidebar displays its status, command,
 
 The extension reads the justfile when the session starts. After adding or changing one, restart Pi or use `/reload`.
 
-## Customization
+## TODO tool
 
-The sidebar is intentionally fixed to its built-in defaults and uses Pi's configured theme. To change its behavior or appearance, use Pi to edit the extension source to customize to your taste.
+The optional `todo` tool lets the model create and track session tasks with `pending`, `in_progress`, and `completed` states. Tasks appear in a `TODO` sidebar panel. The full task snapshot is stored in each tool result, so the list follows session branches and survives `/reload` and compaction without a separate data file.
+
+The tool supports `create`, `update`, `list`, `get`, `delete`, and `clear`. It does not add a separate overlay or `/todos` display because the list is already visible in the sidebar.
+
+## Settings
+
+Edit [`settings.json`](settings.json) in the extension directory:
+
+```json
+{
+  "todo": true,
+  "usage": false
+}
+```
+
+Set `todo` to `false` to omit the tool and its sidebar panel. Set `usage` to `false` to hide the `USAGE` panel. Run `/reload` after changing the file. Missing settings default to `true`; an invalid settings file uses the defaults and prints a warning.
+
+The rest of the sidebar uses its built-in defaults and Pi's configured theme. To change its behavior or appearance, edit the extension source.
 
 ## Privacy and local behavior
 
 - Makes no telemetry, analytics, or external network requests. A just recipe may make its own connections.
-- Does not store prompts, responses, credentials, or session content.
+- Does not store prompts, responses, credentials, or session content outside Pi's session history.
+- Stores TODO snapshots in Pi tool results; it does not create a separate TODO data file.
+- Reads `settings.json` from the extension directory.
 - Reads Pi usage/session metadata to render the sidebar.
 - Reads project justfiles only for trusted projects.
 - Runs read-only Git inspection to summarize the worktree; untracked file contents are never read.

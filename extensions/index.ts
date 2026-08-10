@@ -8,6 +8,7 @@ import {
 import { createFooterComponent, type ThemeLike } from "../src/footer.js";
 import { JustfileRunner } from "../src/justfile.js";
 import { createRunActivityTracker, type RunActivityTracker } from "../src/run-activity.js";
+import { loadSidebarSettings } from "../src/settings.js";
 import {
 	buildSidebarSnapshot,
 	createSidebarController,
@@ -15,6 +16,7 @@ import {
 	type SidebarSnapshot,
 } from "../src/sidebar.js";
 import { SidebarRuntime } from "../src/state.js";
+import { registerTodoTool, TodoRuntime } from "../src/todo.js";
 import type { FooterState } from "../src/types.js";
 
 export default function sidebarExtension(pi: ExtensionAPI): void {
@@ -33,6 +35,9 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 		requestRender();
 		sidebar?.requestRender();
 	};
+	const settings = loadSidebarSettings();
+	const todo = settings.todo ? new TodoRuntime({ onChange: requestAllRenders }) : undefined;
+	if (todo) registerTodoTool(pi, todo);
 
 	function updateExtensionStatuses(next: readonly string[]): void {
 		if (
@@ -60,6 +65,8 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 			...(sessionFile ? { sessionFile } : {}),
 			branchEntryCount: ctx.sessionManager.getBranch().length,
 			extensionStatuses,
+			showUsage: settings.usage,
+			...(todo ? { todo: todo.getSnapshot() } : {}),
 			...(targetJustfile ? { justfile: targetJustfile.getSnapshot() } : {}),
 			...(targetRunActivity ? { runActivity: targetRunActivity.getSnapshot() } : {}),
 		});
@@ -204,6 +211,7 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
+		todo?.restoreFromBranch(ctx);
 		const initializationGeneration = ++lifecycleGeneration;
 		const initializationContext = ctx;
 		if (initializationContext.mode !== "tui") return;
@@ -365,7 +373,11 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 	});
 	pi.on("model_select", (_event, ctx) => getCurrentContextState(ctx)?.runtime?.refreshUsage());
 	pi.on("thinking_level_select", (_event, ctx) => getCurrentContextState(ctx)?.runtime?.refreshUsage());
-	pi.on("session_compact", (_event, ctx) => getCurrentContextState(ctx)?.runtime?.refreshUsage());
+	pi.on("session_compact", (_event, ctx) => {
+		todo?.restoreFromBranch(ctx);
+		getCurrentContextState(ctx)?.runtime?.refreshUsage();
+	});
+	pi.on("session_tree", (_event, ctx) => todo?.restoreFromBranch(ctx));
 	pi.on("session_info_changed", (_event, ctx) => getCurrentContextState(ctx)?.runtime?.refreshUsage());
 	pi.on("session_shutdown", async (_event, ctx) => {
 		const current = getCurrentContextState(ctx);
