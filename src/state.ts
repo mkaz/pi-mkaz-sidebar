@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, MessageEndEvent } from "@earendil-works/pi-coding-agent";
 import { aggregateMetrics, type UsageMessage } from "./metrics.js";
+import { detectTicket } from "./ticket.js";
 import type { ActivityState, SidebarState } from "./types.js";
 import {
 	inspectWorkspacePulse,
@@ -50,6 +51,7 @@ export class SidebarRuntime {
 			extensionStatuses: [],
 		};
 		this.refreshUsage();
+		this.refreshTicket();
 	}
 
 	getState(): SidebarState {
@@ -61,6 +63,15 @@ export class SidebarRuntime {
 		if (this.#state.activity === activity) return;
 		this.#state = { ...this.#state, activity };
 		this.#invalidate();
+	}
+
+	refreshTicket(pending?: MessageEndEvent["message"]): void {
+		if (this.#disposed) return;
+		const pulse = this.#state.workspacePulse;
+		const repository = "data" in pulse ? pulse.data.githubRepository : undefined;
+		const ticket = detectTicket(this.#ctx, this.#state.branch, pending, repository);
+		const { ticket: _ticket, ...state } = this.#state;
+		this.#replaceState({ ...state, ...(ticket ? { ticket } : {}) });
 	}
 
 	refreshUsage(): void {
@@ -125,6 +136,7 @@ export class SidebarRuntime {
 				dirty,
 				workspacePulse: { status, data },
 			});
+			this.refreshTicket();
 			return;
 		}
 
@@ -136,6 +148,7 @@ export class SidebarRuntime {
 				dirty: false,
 				workspacePulse: { status: "not-repo" },
 			});
+			this.refreshTicket();
 			return;
 		}
 

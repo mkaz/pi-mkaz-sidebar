@@ -1,3 +1,4 @@
+import type { Ticket } from "./ticket.js";
 import type { WorkspacePulseData } from "./workspace-pulse.js";
 
 export type ActivityState = "ready" | "working" | "warning" | "error";
@@ -40,6 +41,7 @@ export interface SidebarState {
 	provider?: string;
 	thinkingLevel?: string;
 	branch?: string;
+	ticket?: Ticket;
 	dirty: boolean;
 	workspacePulse: WorkspacePulseState;
 	metrics: SidebarMetrics;

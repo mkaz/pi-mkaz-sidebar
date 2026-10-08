@@ -17,6 +17,7 @@ import {
 } from "../src/sidebar.js";
 import { SidebarRuntime } from "../src/state.js";
 import { registerTodoTool, TodoRuntime } from "../src/todo.js";
+import { parseTicket, TICKET_ENTRY } from "../src/ticket.js";
 import type { FooterState } from "../src/types.js";
 
 export default function sidebarExtension(pi: ExtensionAPI): void {
@@ -205,6 +206,53 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("ticket", {
+		description: "Open the current ticket, or pin one: /ticket [open|status|auto|ID|URL]",
+		handler: async (args, ctx) => {
+			const current = getCurrentContextState(ctx);
+			if (!current?.runtime) {
+				ctx.ui.notify("Ticket support is not active in this session", "warning");
+				return;
+			}
+			const action = args.trim();
+			if (action === "auto" || parseTicket(action)) {
+				pi.appendEntry(TICKET_ENTRY, { ticket: action === "auto" ? null : action });
+				current.runtime.refreshTicket();
+				const ticket = current.runtime.getState().ticket;
+				ctx.ui.notify(ticket ? `Ticket: ${ticket.id}` : "No ticket detected", "info");
+				return;
+			}
+			if (action && action !== "open" && action !== "status") {
+				ctx.ui.notify("Usage: /ticket [open|status|auto|ID|URL]", "warning");
+				return;
+			}
+			current.runtime.refreshTicket();
+			const ticket = current.runtime.getState().ticket;
+			if (!ticket) {
+				ctx.ui.notify("No ticket detected. Use /ticket <Linear, Jira, or GitHub issue URL> to set one.", "warning");
+				return;
+			}
+			if (action === "status") {
+				ctx.ui.notify(`${ticket.id}${ticket.url ? `: ${ticket.url}` : " (URL not known)"}`, "info");
+				return;
+			}
+			if (!ticket.url) {
+				ctx.ui.notify(`URL not known for ${ticket.id}. Use /ticket <Linear, Jira, or GitHub issue URL> to set it.`, "warning");
+				return;
+			}
+			const command = process.platform === "darwin" ? "open"
+				: process.platform === "win32" ? "rundll32" : "xdg-open";
+			try {
+				const result = await pi.exec(command,
+					process.platform === "win32" ? ["url.dll,FileProtocolHandler", ticket.url] : [ticket.url],
+					{ timeout: 10_000 });
+				if (result.code !== 0) throw new Error(result.stderr.trim() || "Browser opener failed");
+			} catch (error) {
+				ctx.ui.notify(`Could not open ${ticket.id}: ${error instanceof Error ? error.message : String(error)}`, "error");
+			}
+		},
+	});
+
 	pi.registerCommand("just", {
 		description: "Run a recipe from the project justfile",
 		handler: (args, ctx) => handleJustCommand(args, ctx),
@@ -344,6 +392,7 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 		getCurrentContextState(ctx)?.runActivity?.updateResponseEstimate(estimatedOutputTokens);
 	});
 	pi.on("message_end", (event, ctx) => {
+		getCurrentContextState(ctx)?.runtime?.refreshTicket(event.message);
 		if (event.message.role !== "assistant") return;
 		getCurrentContextState(ctx)?.runActivity?.finishResponse(event.message.usage.output);
 	});
@@ -376,9 +425,16 @@ export default function sidebarExtension(pi: ExtensionAPI): void {
 	pi.on("session_compact", (_event, ctx) => {
 		todo?.restoreFromBranch(ctx);
 		getCurrentContextState(ctx)?.runtime?.refreshUsage();
+		getCurrentContextState(ctx)?.runtime?.refreshTicket();
 	});
-	pi.on("session_tree", (_event, ctx) => todo?.restoreFromBranch(ctx));
-	pi.on("session_info_changed", (_event, ctx) => getCurrentContextState(ctx)?.runtime?.refreshUsage());
+	pi.on("session_tree", (_event, ctx) => {
+		todo?.restoreFromBranch(ctx);
+		getCurrentContextState(ctx)?.runtime?.refreshTicket();
+	});
+	pi.on("session_info_changed", (_event, ctx) => {
+		getCurrentContextState(ctx)?.runtime?.refreshUsage();
+		getCurrentContextState(ctx)?.runtime?.refreshTicket();
+	});
 	pi.on("session_shutdown", async (_event, ctx) => {
 		const current = getCurrentContextState(ctx);
 		if (!current && currentContext !== undefined) return;

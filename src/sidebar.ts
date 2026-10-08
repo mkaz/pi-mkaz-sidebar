@@ -267,12 +267,17 @@ function workspaceRows(
 	layout: SidebarLayout,
 	palette: SidebarPalette,
 ): WorkspaceRows {
+	const label = (name: string): string => palette.paint("muted", `${name.padEnd(6)} : `);
 	const project = valueRow(snapshot.projectName, palette, "primary");
-	const branch = snapshot.branch ? palette.paint("accent", display(snapshot.branch)) : "";
+	const branch = valueRow(snapshot.branch, palette, "accent");
 	const indicator = pulseIndicator(snapshot.workspacePulse);
-	const gitState = branch && indicator.symbol ? palette.paint(indicator.role, indicator.symbol) : "";
-	const identity = branch ? `${project} ${palette.paint("dim", "·")} ${branch} ${gitState}` : project;
-	const identityRows = layout.compact ? [project, ...(branch ? [`${branch} ${gitState}`] : [])] : [identity];
+	const gitState = snapshot.branch && indicator.symbol ? ` ${palette.paint(indicator.role, indicator.symbol)}` : "";
+	const ticket = snapshot.ticket?.id.replace(/^[^/]+\/([^/]+#\d+)$/, "$1");
+	const identityRows = [
+		`${label("Repo")}${project}`,
+		`${label("Branch")}${branch}${gitState}`,
+		`${label("Ticket")}${valueRow(ticket, palette, "accent")}`,
+	];
 	const pulseData = workspacePulseData(snapshot.workspacePulse);
 	const location = pulseData?.relativeCwd
 		? [palette.paint("muted", `./${sanitize(pulseData.relativeCwd)}`)]
@@ -291,7 +296,7 @@ function workspaceRows(
 	return {
 		identity: identityRows,
 		location,
-		pulseCore: pulse.core,
+		pulseCore: ["", ...pulse.core],
 		pulseDetails: pulse.details,
 		files: pulseData?.snapshot.changedFiles.map((change) => workspaceFileRow(change, palette)) ?? [],
 		session,
@@ -704,7 +709,7 @@ export function renderSidebarLines(
 			panelRole: "accent",
 			rows: workspace.identity,
 			required: false,
-			dropRank: 30,
+			dropRank: 85,
 		},
 		{
 			name: "workspaceLocation",

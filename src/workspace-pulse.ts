@@ -1,5 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import nodePath from "node:path";
+import { githubRepositoryFromRemote } from "./ticket.js";
 
 export interface WorkspaceFileChange {
 	status: string;
@@ -23,6 +24,7 @@ export interface WorkspacePulseData {
 	root: string;
 	relativeCwd: string;
 	branch?: string;
+	githubRepository?: string;
 	snapshot: WorkspacePulseSnapshot;
 }
 
@@ -236,6 +238,12 @@ async function inspectWorkspacePulseUnchecked(
 	);
 	if (diff.code !== 0 || diff.killed) return { kind: "unavailable" };
 
+	// Missing or unreadable remotes must not prevent worktree inspection.
+	const remote = await options.exec("git", ["-C", root, "config", "--get", "remote.origin.url"], {
+		timeout: 2_000,
+	}).catch(() => undefined);
+	const githubRepository = remote?.code === 0 && !remote.killed
+		? githubRepositoryFromRemote(remote.stdout) : undefined;
 	const numstat = parseNumstat(diff.stdout, parsedStatus.submodulePaths);
 	const changedFiles = parsedStatus.changedFiles
 		.map((change) => ({ ...change, modifiedAt: fileModifiedAt(root, change.path) }))
@@ -245,6 +253,7 @@ async function inspectWorkspacePulseUnchecked(
 		root,
 		relativeCwd: nodePath.relative(root, options.cwd),
 		...(parsedStatus.branch ? { branch: parsedStatus.branch } : {}),
+		...(githubRepository ? { githubRepository } : {}),
 		snapshot: {
 			...EMPTY_SNAPSHOT,
 			changedFiles,

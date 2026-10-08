@@ -39,11 +39,26 @@ Or you can add a symlink in a project's `.pi/` directory.
 /sidebar                         # toggle the sidebar
 /sidebar on|off                  # show or hide the sidebar
 /sidebar disable|enable
+/ticket                          # open the current ticket in your browser
+/ticket status                   # show the detected ID and URL
+/ticket <ID|URL>                  # pin a ticket for this session
+/ticket auto                      # return to automatic detection
 /just [recipe [arguments...]]
 /just --stop|--restart|--status
 ```
 
 The sidebar is 44 columns wide and appears only when the terminal has enough room to preserve 64 columns for Pi. It has no resize mode, mouse handling, or terminal-input interception.
+
+## Current ticket
+
+WORKSPACE shows a ticket when the extension can identify one locally. It prefers a pinned ticket, then the latest user message containing a single ticket reference, the session name, and the Git branch (for example `mkaz/FAM-1234-fix`). Messages without a ticket reference leave the previous ticket selected. As a fallback, it uses ticket links in the conversation when they identify only one ticket.
+
+- **Linear and Jira:** IDs such as `FAM-1234` work regardless of phrasing: “work on FAM-1234,” “this fixes FAM-1234,” or “Linear ticket FAM-1234.”
+- **GitHub:** Supports issue URLs and `owner/repo#123` references. Phrases such as “This change addresses GitHub issue #2,” “fix issue #2,” and “work on #2” use the repository from the Git `origin` remote. Without a GitHub origin, a single repository identified by GitHub issue links or qualified references in the conversation supplies the context.
+
+If “GitHub issue #2” has no repository context, the sidebar still shows `GitHub #2`, but opening it requires a URL. Bare numbers alone are not treated as tickets. Detection uses local pattern matching, not a skill or an additional model request.
+
+`/ticket` (or `/ticket open`) opens the ticket in your default browser. The URL must be a Linear issue, Jira `/browse/`, or GitHub issue link found in the active session history or supplied with `/ticket <URL>`. Qualified GitHub references supply their own browser URL (for example `/ticket mkaz/pi-mkaz-sidebar#123`); it does not guess workspace domains or fetch ticket metadata. If only an ID is known, the command asks for its URL. Pinned tickets survive reloads and compaction, and follow the active session branch. `/ticket auto` removes the pin.
 
 ## Justfile recipes
 
@@ -85,9 +100,10 @@ The rest of the sidebar uses its built-in defaults and Pi's configured theme. To
 - Does not store prompts, responses, credentials, or session content outside Pi's session history.
 - Stores TODO snapshots in Pi tool results; it does not create a separate TODO data file.
 - Reads `settings.json` from the extension directory.
-- Reads Pi usage/session metadata to render the sidebar.
+- Reads Pi usage/session metadata and conversation text to render the sidebar and identify ticket IDs/URLs.
+- Stores ticket pins in Pi session entries; opens ticket URLs only on an explicit `/ticket` command.
 - Reads project justfiles only for trusted projects.
-- Runs read-only Git inspection to summarize the worktree; untracked file contents are never read.
+- Runs read-only Git inspection to summarize the worktree and read the `origin` remote for GitHub issue context; untracked file contents are never read.
 
 ## License
 
